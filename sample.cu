@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 // Define the ODE system (example: van der Pol oscillator)
-__global__ void evaluate_ode(double* y, double* dydt, double t, int num_odes) {
+__global__ void evaluate_ode(double* y, double* dydt, double t, int num_odes, double mu) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if (i < num_odes) {
         double x = y[i];
@@ -14,7 +14,7 @@ __global__ void evaluate_ode(double* y, double* dydt, double t, int num_odes) {
 }
 
 // BDF2 implementation (adjust for different orders)
-__global__ void bdf2_step(double* y, double* dydt, double* y_prev, double h, int num_odes) {
+__global__ void bdf2_step(double* y, double* dydt, double* y_prev, double h, int num_odes, double *dydt_prev) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if (i < num_odes) {
         y[i] = y_prev[i] + (3 * h / 2) * dydt[i] - (h / 2) * dydt_prev[i];
@@ -22,7 +22,7 @@ __global__ void bdf2_step(double* y, double* dydt, double* y_prev, double h, int
 }
 
 // Newton-Raphson iteration
-__global__ void newton_raphson(double* y, double* dydt, double* y_prev, double h, double* delta, int num_odes) {
+__global__ void newton_raphson(double* y, double* dydt, double* y_prev, double h, double* delta, int num_odes, double mu, double *dydt_prev) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if (i < num_odes) {
         double x = y[i];
@@ -65,14 +65,14 @@ int main() {
     // Main loop
     for (int step = 0; step < num_steps; step++) {
         // Evaluate ODE
-        evaluate_ode<<<(num_odes + 31) / 32, 32>>>(y, dydt, t, num_odes);
+        evaluate_ode<<<(num_odes + 31) / 32, 32>>>(y, dydt, t, num_odes, mu);
 
         // BDF2 step
-        bdf2_step<<<(num_odes + 31) / 32, 32>>>(y, dydt, y_prev, h, num_odes);
+        bdf2_step<<<(num_odes + 31) / 32, 32>>>(y, dydt, y_prev, h, num_odes, dydt_prev);
 
         // Newton-Raphson iteration
         for (int iter = 0; iter < 10; iter++) {
-            newton_raphson<<<(num_odes + 31) / 32, 32>>>(y, dydt, y_prev, h, delta, num_odes);
+            newton_raphson<<<(num_odes + 31) / 32, 32>>>(y, dydt, y_prev, h, delta, num_odes, mu, dydt_prev);
             // Update y using cuSOLVER's linear solver (e.g., cusolverDnDgesv)
             // ...
         }
