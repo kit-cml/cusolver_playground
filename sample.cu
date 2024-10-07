@@ -58,6 +58,12 @@ int main() {
     cudaMalloc(&dydt_prev, num_odes * sizeof(double));
     cudaMalloc(&delta, num_odes * sizeof(double));
 
+    int *devIpiv, *devInfo;
+    int info;
+    // Allocate space for pivots and info
+    cudaMalloc((void**)&devIpiv, num_odes * sizeof(int)); 
+    cudaMalloc((void**)&devInfo, sizeof(int));
+
     // Set initial conditions
     y[0] = 2.0;
     y[1] = 0.0;
@@ -73,8 +79,25 @@ int main() {
         // Newton-Raphson iteration
         for (int iter = 0; iter < 10; iter++) {
             newton_raphson<<<(num_odes + 31) / 32, 32>>>(y, dydt, y_prev, h, delta, num_odes, mu, dydt_prev);
-            // Update y using cuSOLVER's linear solver (e.g., cusolverDnDgesv)
-            // ...
+        if (cudaGetLastError() != cudaSuccess) {
+            fprintf(stderr, "Error performing Newton-Raphson iteration: %s\n", cudaGetErrorName(cudaGetLastError()));
+            return 1;
+            }
+
+        // Update y using cuSOLVER's linear solver (e.g., cusolverDnDgesv)
+        int info;
+        cusolverDnDgetrf(handle, num_odes, num_odes, delta, num_odes, NULL, devIpiv, devInfo);
+        if (info != 0) {
+            fprintf(stderr, "Error solving linear system: %d\n", info);
+            return 1;
+             }
+        }
+
+        cusolverDnDgetrs(handle, CUBLAS_OP_N, num_odes, 1, delta, num_odes, devIpiv, y, num_odes, devInfo);
+        cudaMemcpy(&info, devInfo, sizeof(int), cudaMemcpyDeviceToHost);
+        if (info != 0) {
+            fprintf(stderr, "Error solving linear system: %d\n", info);
+            return 1;
         }
 
         // Update y_prev and dydt_prev
@@ -90,6 +113,8 @@ int main() {
     cudaFree(y_prev);
     cudaFree(dydt_prev);
     cudaFree(delta);
+    cudaFree(devIpiv);
+    cudaFree(devInfo);
 
     cusolverDnDestroy(handle);
 
